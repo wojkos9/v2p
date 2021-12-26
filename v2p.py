@@ -41,38 +41,54 @@ def extract_slides(in_file: str, out_dir=None, thold=0.01, step=100):
                 i += 1
                 frame.to_image().save(f'{out_dir}/{i:02}.jpeg')
                 last = new
+    return out_dir
 
-def find_content_bounds(img: np.ndarray):
+def find_content_bounds(img: np.ndarray, args):
     h, w = img.shape[:2]
 
-    bounds = [-1, -1]
+    if args.full:
+        bounds = [0, h]
+    else:
+        bounds = [-1, -1]
 
-    start_ix = 10
-    col_th = 0.2
-    window = 10
-    min_window = 7
-    min_perc = 0.01
-    border = int(0.05 * h)
+        start_ix = 10
+        col_th = 0.4
+        window = 10
+        min_window = 7
+        min_perc = 0.01
+        border = int(0.05 * h)
+        half_ranges = enumerate((range(start_ix+1, h // 2), range(h-1, h // 2, -1)))
 
-    for j, r in enumerate((range(start_ix+1, h // 2), range(h-1, h // 2, -1))):
-        stack = []
-        val = 0
-        for i in r:
-            row = img[i]
-            m = 1 if sum(1 if p <= col_th else 0 for p in row) > min_perc * w else 0
+        avg_black = lambda row: sum(1 if p <= col_th else 0 for p in row) / w
 
-            stack.append(m)
-            val += m
-            if len(stack) == window:
-                if val >= min_window:
-                    bounds[j] = max(0, i - window - border ) if j == 0 else min(h, i + window + border)
-                    break
-                val -= stack.pop(0)
+        if args.black:
+            for j, r in half_ranges:
+                for i in r:
+                    row = img[i]
+                    avg = avg_black(row)
+                    if avg < 0.9:
+                        bounds[j] = i + 2 * (-1 if j else 1)
+                        break
+        else:
+            for j, r in half_ranges:
+                stack = []
+                val = 0
+                for i in r:
+                    row = img[i]
+                    m = 1 if avg_black(row) > min_perc else 0
+
+                    stack.append(m)
+                    val += m
+                    if len(stack) == window:
+                        if val >= min_window:
+                            bounds[j] = max(0, i - window - border ) if j == 0 else min(h, i + window + border)
+                            break
+                        val -= stack.pop(0)
 
     return bounds, [0, w]
 
 
-def montage(in_dir: str, n=-1, per_page=None):
+def montage(in_dir: str, args, n=-1, per_page=None):
     with cwd(in_dir):
         files = sorted(filter(lambda x: not x.startswith("crop"), os.listdir(".")))[:n]
         pdf = FPDF()
@@ -81,7 +97,7 @@ def montage(in_dir: str, n=-1, per_page=None):
         for i, (img, f) in enumerate(((np.asfarray(Image.open(f).convert('L')) / 255, f) for f in files)):
             new_f = "crop_"+f
             sys.stderr.write(f"{i}/{len(files)} ({f}): ")
-            (a, b), (_, w) = find_content_bounds(img)
+            (a, b), (_, w) = find_content_bounds(img, args=args)
             if a == -1 or b == -1:
                 print("Fail:", a, b)
                 return
@@ -110,9 +126,13 @@ if __name__ == "__main__":
     par.add_argument("-i", dest="in_file", type=str)
     par.add_argument("-d", dest="in_dir", type=str)
     par.add_argument("-o", dest="out_dir", type=str)
+    par.add_argument("-b", dest="black", action="store_true")
+    par.add_argument("-a", dest="all", action="store_true")
+    par.add_argument("-f", dest="full", action="store_true")
     args = par.parse_args()
 
+    dir = args.in_dir
     if args.in_file:
-        extract_slides(args.in_file, args.out_dir)
-    elif args.in_dir:
-        montage(args.in_dir, -3)
+        dir = extract_slides(args.in_file, args.out_dir)
+    if dir or args.all:
+        montage(dir, args, -3)

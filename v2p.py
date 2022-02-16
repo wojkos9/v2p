@@ -25,7 +25,7 @@ def mae(a, b):
     return mae
 
 
-def extract_slides(in_file: str, out_dir=None, thold=0.01, step=100):
+def extract_slides(in_file: str, args, out_dir=None, thold=0.01):
     if out_dir is None:
         out_dir = in_file[:in_file.rfind(".")]
         if not os.path.isdir(out_dir):
@@ -34,7 +34,7 @@ def extract_slides(in_file: str, out_dir=None, thold=0.01, step=100):
     i = 0
     with av.open(in_file) as container:
         for frame in container.decode(video=0):
-            if frame.index % step:
+            if frame.index % args.step:
                 continue
             new = frame.to_ndarray()
             if last is None or mae(last, new) > thold:
@@ -52,7 +52,7 @@ def find_content_bounds(img: np.ndarray, args):
         bounds = [-1, -1]
 
         start_ix = 10
-        col_th = 0.4
+        col_th = 0.5 if not args.threshold else args.threshold
         window = 10
         min_window = 7
         min_perc = 0.01
@@ -88,9 +88,12 @@ def find_content_bounds(img: np.ndarray, args):
     return bounds, [0, w]
 
 
-def montage(in_dir: str, args, n=-1, per_page=None):
+def montage(in_dir: str, args, per_page=None):
     with cwd(in_dir):
-        files = sorted(filter(lambda x: not x.startswith("crop"), os.listdir(".")))[:n]
+        files = sorted(filter(lambda x: not x.startswith("crop") and not x.endswith("pdf"), os.listdir(".")))
+        skip = args.range
+        if skip:
+            files = files[:skip] if skip < 0 else files[skip:]
         pdf = FPDF()
         pdf.add_page()
         offset = 0
@@ -100,7 +103,7 @@ def montage(in_dir: str, args, n=-1, per_page=None):
             (a, b), (_, w) = find_content_bounds(img, args=args)
             if a == -1 or b == -1:
                 print("Fail:", a, b)
-                return
+                continue
 
             frag_h = b - a
             delta = frag_h * pdf.w / w
@@ -129,10 +132,13 @@ if __name__ == "__main__":
     par.add_argument("-b", dest="black", action="store_true")
     par.add_argument("-a", dest="all", action="store_true")
     par.add_argument("-f", dest="full", action="store_true")
+    par.add_argument("-r", dest="range", type=int)
+    par.add_argument("-s", dest="step", type=int, default=100)
+    par.add_argument("-t", dest="threshold", type=float)
     args = par.parse_args()
 
     dir = args.in_dir
     if args.in_file:
-        dir = extract_slides(args.in_file, args.out_dir)
+        dir = extract_slides(args.in_file, args, args.out_dir)
     if dir or args.all:
-        montage(dir, args, -3)
+        montage(dir, args)

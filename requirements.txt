@@ -1,0 +1,7 @@
+av==8.1.0
+fpdf==1.7.2
+future==0.18.2
+numpy==1.22.2
+Pillow==9.0.1
+pyee==9.0.4
+typing_extensions==4.1.1

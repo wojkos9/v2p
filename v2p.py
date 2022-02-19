@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 import sys
 from fpdf import FPDF
+from skimage.transform import resize
 
 from contextlib import contextmanager
 
@@ -39,41 +40,53 @@ def extract_slides(in_file: str, args, out_dir=None, thold=0.01):
             new = frame.to_ndarray()
             if last is None or mae(last, new) > thold:
                 i += 1
-                frame.to_image().save(f'{out_dir}/{i:02}.jpeg')
+                fname = f'{out_dir}/{i:02}.jpeg'
+                frame.to_image().save(fname)
+                print("Saved", fname)
                 last = new
     return out_dir
 
+n = 0
+
 def find_content_bounds(img: np.ndarray, args):
     h, w = img.shape[:2]
-
+    vbounds = [0, w]
     if args.full:
         bounds = [0, h]
+
     else:
         bounds = [-1, -1]
 
-        start_ix = 10
         col_th = 0.5 if not args.threshold else args.threshold
         window = 10
         min_window = 7
         min_perc = 0.01
         border = int(0.05 * h)
-        half_ranges = enumerate((range(start_ix+1, h // 2), range(h-1, h // 2, -1)))
+        make_ranges = lambda x: enumerate((range(0, x // 2), range(x-1, x // 2, -1)))
+        half_ranges = make_ranges(h)
 
-        avg_black = lambda row: sum(1 if p <= col_th else 0 for p in row) / w
+        avg_black = lambda row: sum(1 if p <= col_th else 0 for p in row) / len(row)
 
         if args.black:
-            for j, r in half_ranges:
-                for i in r:
+            for j, ran in half_ranges:
+                for i in ran:
                     row = img[i]
                     avg = avg_black(row)
                     if avg < 0.9:
                         bounds[j] = i + 2 * (-1 if j else 1)
                         break
+            for j, ran in make_ranges(w):
+                for i in ran:
+                    col = img[:, i]
+                    avg = avg_black(col)
+                    if avg < 0.9:
+                        vbounds[j] = i + 2 * (-1 if j else 1)
+                        break
         else:
-            for j, r in half_ranges:
+            for j, ran in half_ranges:
                 stack = []
                 val = 0
-                for i in r:
+                for i in ran:
                     row = img[i]
                     m = 1 if avg_black(row) > min_perc else 0
 
@@ -85,7 +98,7 @@ def find_content_bounds(img: np.ndarray, args):
                             break
                         val -= stack.pop(0)
 
-    return bounds, [0, w]
+    return bounds, vbounds
 
 
 def montage(in_dir: str, args, per_page=None):
@@ -100,13 +113,18 @@ def montage(in_dir: str, args, per_page=None):
         for i, (img, f) in enumerate(((np.asfarray(Image.open(f).convert('L')) / 255, f) for f in files)):
             new_f = "crop_"+f
             sys.stderr.write(f"{i}/{len(files)} ({f}): ")
-            (a, b), (_, w) = find_content_bounds(img, args=args)
-            if a == -1 or b == -1:
+            width = img.shape[1]
+            (a, b), (c, d) = find_content_bounds(img, args=args)
+            if a == -1 or b == -1 or d <= c:
                 print("Fail:", a, b)
                 continue
 
-            frag_h = b - a
-            delta = frag_h * pdf.w / w
+            crop: np.ndarray = img[a:b, c:d]
+            sc = width/(d-c)
+            frag_h = int((b - a) * sc)
+            crop = resize(crop, (frag_h, width))
+
+            delta = frag_h * pdf.w / width
 
             if per_page:
                 if i and i % per_page == 0:
@@ -114,8 +132,8 @@ def montage(in_dir: str, args, per_page=None):
             elif offset + delta >= pdf.h:
                     offset = 0
                     pdf.add_page()
-            crop: np.ndarray = np.uint8(img[a:b] * 255)
-            crop = crop.repeat(3, -1).reshape((frag_h, w, 3))
+
+            crop = (np.uint8(crop * 255)).repeat(3, -1).reshape((frag_h, width, 3))
             Image.fromarray(crop).save(new_f)
 
             pdf.image(new_f, 0, offset, w=pdf.w)

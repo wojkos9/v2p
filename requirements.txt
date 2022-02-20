@@ -1,7 +1,12 @@
 av==8.1.0
 fpdf==1.7.2
-future==0.18.2
+imageio==2.16.0
+networkx==2.6.3
 numpy==1.22.2
+packaging==21.3
 Pillow==9.0.1
-pyee==9.0.4
-typing_extensions==4.1.1
+pyparsing==3.0.7
+PyWavelets==1.2.0
+scikit-image==0.19.2
+scipy==1.8.0
+tifffile==2022.2.9
